@@ -1,0 +1,12 @@
+/* Oculta contenedores de anuncios comunes que quedan vacíos tras bloquear las peticiones. */
+ins.adsbygoogle,
+iframe[src*="doubleclick.net"],
+iframe[src*="googlesyndication.com"],
+iframe[id^="google_ads_iframe"],
+div[id^="div-gpt-ad"],
+div[id^="taboola-"],
+div[class*="OUTBRAIN"],
+.ad-banner, .ad-container, .ad-slot, .advertisement, .adsbox,
+[data-ad-slot], [data-ad-client], [data-google-query-id] {
+  display: none !important;
+}
