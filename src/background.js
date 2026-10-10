@@ -47,3 +47,82 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })();
   return true; // respuesta asíncrona
 });
+
+// ---------------------------------------------------------------------------
+// Bloqueador de ventanas emergentes (pop-ups / pop-unders).
+// Una pestaña nueva abierta por una página se cierra si va a otro sitio y el
+// usuario no hizo clic justo antes en un enlace hacia ese mismo sitio.
+// ---------------------------------------------------------------------------
+const CLICK_WINDOW_MS = 2000;
+const recentClicks = new Map(); // tabId -> [{ site, time }]
+const pendingTabs = new Map();  // tabId -> { sourceTabId, sourceUrl } (aún en about:blank)
+
+function siteOf(url) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (!protocol.startsWith("http")) return null;
+    // Aproximación del dominio registrable: últimos dos niveles (ej. "google.com").
+    return hostname.split(".").slice(-2).join(".");
+  } catch {
+    return null;
+  }
+}
+
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg.type !== "userClick" || !sender.tab) return;
+  const site = siteOf(msg.href);
+  if (!site) return;
+  const now = Date.now();
+  const list = (recentClicks.get(sender.tab.id) || []).filter((c) => now - c.time < CLICK_WINDOW_MS);
+  list.push({ site, time: now });
+  recentClicks.set(sender.tab.id, list);
+});
+
+chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
+  const source = await chrome.tabs.get(d.sourceTabId).catch(() => null);
+  if (!source) return;
+  if (siteOf(d.url)) {
+    await checkPopup(d.tabId, d.url, d.sourceTabId, source.url);
+  } else {
+    // window.open() sin URL (about:blank) que luego redirige: decidir en la siguiente navegación.
+    pendingTabs.set(d.tabId, { sourceTabId: d.sourceTabId, sourceUrl: source.url });
+    setTimeout(() => pendingTabs.delete(d.tabId), 10000);
+  }
+});
+
+chrome.webNavigation.onBeforeNavigate.addListener(async (d) => {
+  const pending = d.frameId === 0 && pendingTabs.get(d.tabId);
+  if (!pending || !siteOf(d.url)) return;
+  pendingTabs.delete(d.tabId);
+  await checkPopup(d.tabId, d.url, pending.sourceTabId, pending.sourceUrl);
+});
+
+async function checkPopup(tabId, targetUrl, sourceTabId, sourceUrl) {
+  const { enabled = true, allowlist = [] } = await chrome.storage.local.get(["enabled", "allowlist"]);
+  const sourceSite = siteOf(sourceUrl);
+  if (!enabled || !sourceSite) return;
+  if (allowlist.some((d) => siteOf(`https://${d}`) === sourceSite)) return;
+
+  const targetSite = siteOf(targetUrl);
+  if (targetSite === sourceSite) return;
+
+  // Ventanas tipo "popup" con tamaño propio (inicio de sesión con Google, pagos…) se permiten.
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return;
+  const win = await chrome.windows.get(tab.windowId).catch(() => null);
+  if (win && win.type === "popup") return;
+
+  // El mensaje del clic puede llegar un instante después del evento de navegación.
+  await new Promise((r) => setTimeout(r, 300));
+  const clicks = recentClicks.get(sourceTabId) || [];
+  if (clicks.some((c) => c.site === targetSite && Date.now() - c.time < CLICK_WINDOW_MS)) return;
+
+  await chrome.tabs.remove(tabId).catch(() => {});
+  const { popupsBlocked = 0 } = await chrome.storage.local.get("popupsBlocked");
+  await chrome.storage.local.set({ popupsBlocked: popupsBlocked + 1 });
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  recentClicks.delete(tabId);
+  pendingTabs.delete(tabId);
+});

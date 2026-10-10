@@ -19,6 +19,17 @@
 
   chrome.storage.local.get(["enabled", "allowlist"], ({ enabled = true, allowlist = [] }) => {
     if (!enabled || allowlist.includes(location.hostname)) return;
+
+    // Avisa al bloqueador de pop-ups de los enlaces que el usuario pulsa de verdad,
+    // para no cerrar las pestañas nuevas que sí quiere abrir.
+    const reportClick = (e) => {
+      if (!e.isTrusted) return;
+      const link = e.target instanceof Element && e.target.closest("a[href]");
+      if (link) chrome.runtime.sendMessage({ type: "userClick", href: link.href }).catch(() => {});
+    };
+    document.addEventListener("click", reportClick, true);
+    document.addEventListener("auxclick", reportClick, true);
+
     new MutationObserver((mutations) => {
       for (const m of mutations) m.addedNodes.forEach((n) => n.nodeType === 1 && scan(n));
     }).observe(document.documentElement, { childList: true, subtree: true });

@@ -17,6 +17,8 @@ const $ = (id) => document.getElementById(id);
   };
 
   render(await chrome.runtime.sendMessage({ type: "getState" }));
+  const { popupsBlocked = 0 } = await chrome.storage.local.get("popupsBlocked");
+  $("popups").textContent = popupsBlocked;
 
   try {
     const { rulesMatchedInfo } = await chrome.declarativeNetRequest.getMatchedRules({ tabId: tab.id });
