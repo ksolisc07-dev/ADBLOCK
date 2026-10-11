@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Sitio bloqueado - Escudo AdBlock</title>
+  <link rel="stylesheet" href="warning.css">
+</head>
+<body>
+  <main>
+    <img src="../icons/icon128.png" alt="" width="72" height="72">
+    <h1>Escudo AdBlock bloqueó este sitio</h1>
+    <p class="host" id="host"></p>
+    <p>Este dominio usa una terminación (<b id="tld"></b>) que se usa mucho en estafas: CAPTCHA falsos
+      ("No soy un robot"), avisos falsos de virus y descargas maliciosas. Lo más probable es que hayas
+      llegado aquí desde un anuncio o una ventana emergente.</p>
+    <div class="tip">
+      <b>Recuerda:</b> ninguna página legítima te pide pulsar <b>Windows + R</b> y pegar un comando
+      para demostrar que no eres un robot. Si una página lo hace, es un virus.
+    </div>
+    <div class="actions">
+      <button id="back" class="primary">Salir de aquí</button>
+      <button id="continue" class="link">Confío en este sitio, continuar</button>
+    </div>
+  </main>
+  <script src="warning.js"></script>
+</body>
+</html>

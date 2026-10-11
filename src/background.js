@@ -1,11 +1,23 @@
 // Service worker: activa/desactiva el bloqueo y gestiona la lista de sitios permitidos.
 const RULESETS = ["ads", "malware"];
 const ALLOW_RULE_BASE = 100000; // ids de reglas dinámicas para sitios permitidos
+const WARN_RULE_ID = 1;          // regla dinámica que manda a la página de aviso
+
+// Dominios de nivel superior muy usados en estafas (CAPTCHA falsos, descargas de virus…).
+// Antes de abrirlos se muestra una página de aviso; el usuario puede continuar si confía.
+const ABUSE_TLDS = ["cfd", "sbs", "cyou", "icu", "buzz", "top", "click", "rest", "bond", "lol",
+  "quest", "autos", "boats", "yachts", "hair", "makeup", "beauty", "skin", "homes", "mom",
+  "monster", "tk", "ml", "ga", "cf", "gq", "zip", "mov", "cam", "country", "kim", "work", "surf"];
 
 chrome.runtime.onInstalled.addListener(async () => {
   const { enabled = true, allowlist = [] } = await chrome.storage.local.get(["enabled", "allowlist"]);
   await chrome.storage.local.set({ enabled, allowlist });
   await chrome.declarativeNetRequest.setExtensionActionOptions({ displayActionCountAsBadgeText: true });
+  await applyState(enabled, allowlist);
+});
+
+chrome.runtime.onStartup.addListener(async () => {
+  const { enabled = true, allowlist = [] } = await chrome.storage.local.get(["enabled", "allowlist"]);
   await applyState(enabled, allowlist);
 });
 
@@ -18,17 +30,49 @@ async function applyState(enabled, allowlist) {
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: existing.map((r) => r.id),
-    addRules: allowlist.map((domain, i) => ({
+    addRules: [warningRule(), ...allowlist.map((domain, i) => ({
       id: ALLOW_RULE_BASE + i,
       priority: 2,
       action: { type: "allowAllRequests" },
       condition: { requestDomains: [domain], resourceTypes: ["main_frame", "sub_frame"] }
-    }))
+    }))]
   });
   await chrome.action.setBadgeBackgroundColor({ color: enabled ? "#c81e28" : "#777777" });
 }
 
+// Siempre activa (protección contra virus), aunque se pause el bloqueo de anuncios.
+function warningRule() {
+  return {
+    id: WARN_RULE_ID,
+    priority: 1,
+    action: {
+      type: "redirect",
+      redirect: { regexSubstitution: `chrome-extension://${chrome.runtime.id}/src/warning.html#\\0` }
+    },
+    // requestDomains incluye subdominios, así que "cfd" cubre cualquier *.cfd.
+    condition: { requestDomains: ABUSE_TLDS, regexFilter: "^.*$", resourceTypes: ["main_frame"] }
+  };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "allowOnce" && msg.host) {
+    // Permite ese dominio hasta que se cierre el navegador.
+    chrome.declarativeNetRequest.getSessionRules().then((rules) => chrome.declarativeNetRequest.updateSessionRules({
+      addRules: [{
+        id: Math.max(0, ...rules.map((r) => r.id)) + 1,
+        priority: 2,
+        action: { type: "allow" },
+        condition: { requestDomains: [msg.host], resourceTypes: ["main_frame"] }
+      }]
+    })).then(() => sendResponse({ ok: true }), (e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === "threatBlocked") {
+    chrome.storage.local.get("threatsBlocked").then(({ threatsBlocked = 0 }) =>
+      chrome.storage.local.set({ threatsBlocked: threatsBlocked + 1 }));
+    return;
+  }
+  if (!["getState", "setEnabled", "toggleSite"].includes(msg.type)) return;
   (async () => {
     const state = await chrome.storage.local.get(["enabled", "allowlist"]);
     let { enabled = true, allowlist = [] } = state;
